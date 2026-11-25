@@ -1,3 +1,0 @@
--keep class io.nekohasekai.libbox.** { *; }
--keep class go.** { *; }
--dontwarn io.nekohasekai.libbox.**
