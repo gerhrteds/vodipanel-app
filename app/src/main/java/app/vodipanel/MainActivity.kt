@@ -175,7 +175,7 @@ fun Home(cfg: JSONObject?, onToggle: () -> Unit, onSettings: () -> Unit) {
             }
             Spacer(Modifier.height(12.dp))
             Text(when (status) {
-                Status.ON -> "✅ متصل هستید"; Status.CONNECTING -> "در حال اتصال…"
+                Status.ON -> "✅ متصل هستید"; Status.CONNECTING -> message.ifBlank { "در حال اتصال…" }
                 Status.ERROR -> "❌ " + message.ifBlank { "اتصال ناموفق بود" }; else -> "قطع است"
             }, color = ring, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
         }
@@ -215,19 +215,21 @@ fun ExitCard(status: Status) {
     val pal = LocalPal.current
     val since by VodiState.since.collectAsState()
     val engine by VodiState.engine.collectAsState()
+    val verified by VodiState.exit.collectAsState()
     var info by remember { mutableStateOf<ExitInfo?>(null) }
     var loading by remember { mutableStateOf(false) }
     var rescan by remember { mutableStateOf(0) }
     var now by remember { mutableStateOf(System.currentTimeMillis()) }
 
-    LaunchedEffect(status, rescan) {
+    LaunchedEffect(status, rescan, verified) {
+        if (status != Status.ON) { info = null; return@LaunchedEffect }
+        // the connection check already measured location before "connected": show it instantly
+        if (rescan == 0 && verified != null) { info = verified; loading = false; return@LaunchedEffect }
         info = null
-        if (status == Status.ON) {
-            loading = true
-            delay(1500)
-            info = withContext(Dispatchers.IO) { ExitProbe.fetch() }
-            loading = false
-        }
+        loading = true
+        delay(1500)
+        info = withContext(Dispatchers.IO) { ExitProbe.fetch() }
+        loading = false
     }
     LaunchedEffect(status) { while (status == Status.ON) { now = System.currentTimeMillis(); delay(1000) } }
 
@@ -262,7 +264,7 @@ fun ExitCard(status: Status) {
             }
             else -> Text("دریافت آی‌پی و کشور ممکن نشد. دوباره اسکن کنید.", color = pal.muted, fontSize = 14.sp)
         }
-        InfoRow("مسیر اتصال", if (engine == "warp") "Cloudflare WARP (پشتیبان رایگان)" else "سرورهای اصلی")
+        InfoRow("مسیر اتصال", if (engine.startsWith("warp")) "Cloudflare WARP (پشتیبان رایگان)" else "سرورهای اصلی")
         Spacer(Modifier.height(6.dp))
         OutlinedButton(onClick = { rescan++ }, enabled = !loading, shape = RoundedCornerShape(12.dp),
             contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp)) {

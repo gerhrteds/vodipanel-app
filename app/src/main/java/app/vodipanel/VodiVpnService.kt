@@ -18,15 +18,23 @@ class VodiVpnService : VpnService() {
         job?.cancel()
         job = scope.launch {
             VodiState.status.value = Status.CONNECTING
-            VodiState.message.value = ""
+            VodiState.message.value = "در حال آماده‌سازی…"
+            VodiState.exit.value = null
+            // our real IP, measured before any tunnel exists (used to prove the tunnel really changes it)
+            val baseline = TunnelCheck.baselineIp()
             var firstError: String? = null
             for (e in VodiController.engines()) {
                 try {
+                    VodiState.message.value = "در حال برقراری تونل (${e.label})…"
                     val cfg = e.prepare(this@VodiVpnService)
                     LibboxCore.start(this@VodiVpnService, cfg)
                     active = e
+                    // NOT connected yet: first real traffic must flow, then the location must be detected
+                    val info = TunnelCheck.verify(baseline, e.verifyTimeoutMs) { VodiState.message.value = it }
                     VodiState.engine.value = e.id
+                    VodiState.exit.value = info
                     VodiState.since.value = System.currentTimeMillis()
+                    VodiState.message.value = ""
                     VodiState.status.value = Status.ON
                     return@launch
                 } catch (c: CancellationException) {
@@ -35,6 +43,10 @@ class VodiVpnService : VpnService() {
                     if (firstError == null) firstError = ex.message
                     // invalid / expired subscription or rate limit: never fall back to the free path
                     if (ex.code == 403 || ex.code == 429) break
+                } catch (ex: VerifyException) {
+                    if (firstError == null) firstError = ex.message
+                    active = null
+                    LibboxCore.stop() // unverified tunnel must not stay up; try the next engine
                 } catch (ex: java.io.IOException) {
                     if (firstError == null) firstError = "ارتباط با سرور برقرار نشد؛ اینترنت را بررسی کنید"
                 } catch (ex: Throwable) {
@@ -43,6 +55,8 @@ class VodiVpnService : VpnService() {
                     LibboxCore.stop()
                 }
             }
+            LibboxCore.stop()
+            VodiState.exit.value = null
             VodiState.message.value = firstError ?: "اتصال برقرار نشد"
             VodiState.status.value = Status.ERROR
             stopForeground(STOP_FOREGROUND_REMOVE)
@@ -55,6 +69,8 @@ class VodiVpnService : VpnService() {
         job?.cancel()
         runBlocking { active?.stop() }
         LibboxCore.stop()
+        VodiState.exit.value = null
+        VodiState.message.value = ""
         VodiState.status.value = Status.OFF
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()

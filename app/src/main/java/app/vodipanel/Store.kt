@@ -14,8 +14,10 @@ object VodiState {
     val message = MutableStateFlow("")
     /** Epoch millis when the tunnel came up (for the connection timer). */
     val since = MutableStateFlow(0L)
-    /** Id of the engine that is currently carrying the tunnel ("panel" or "warp"). */
+    /** Id of the engine that is currently carrying the tunnel ("panel" or "warp..."). */
     val engine = MutableStateFlow("")
+    /** Exit IP / country measured by the connection check BEFORE the status became ON (null while not verified). */
+    val exit = MutableStateFlow<ExitInfo?>(null)
 }
 
 object Prefs {
@@ -67,11 +69,11 @@ object Api {
     }
 
     /** Blocking HTTP call - run on Dispatchers.IO. Throws ApiException with the server's Persian message. */
-    fun request(path: String): String {
+    fun request(path: String, connectMs: Int = 15000, readMs: Int = 20000): String {
         val c = URL(Prefs.panelUrl + path).openConnection() as HttpURLConnection
         c.requestMethod = "GET"
-        c.connectTimeout = 15000
-        c.readTimeout = 20000
+        c.connectTimeout = connectMs
+        c.readTimeout = readMs
         try {
             val code = c.responseCode
             val text = (if (code in 200..299) c.inputStream else c.errorStream)?.bufferedReader()?.readText().orEmpty()

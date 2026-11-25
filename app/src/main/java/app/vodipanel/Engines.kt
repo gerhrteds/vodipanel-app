@@ -17,12 +17,18 @@ import java.util.TimeZone
  */
 interface Engine {
     val id: String
+    /** Short Persian name shown while connecting. */
+    val label: String
+    /** How long to wait for real traffic through the tunnel before giving up on this engine. */
+    val verifyTimeoutMs: Long get() = 15000
     suspend fun prepare(ctx: Context): String
     suspend fun stop() {}
 }
 
 class PanelEngine : Engine {
     override val id = "panel"
+    override val label = "سرورهای اصلی"
+    override val verifyTimeoutMs = 25000L // urltest needs a moment to pick a healthy server
     override suspend fun prepare(ctx: Context): String {
         val token = Prefs.subToken.ifBlank { "public" }
         val res = Api.request("/sub/" + java.net.URLEncoder.encode(token, "UTF-8"))
@@ -30,16 +36,22 @@ class PanelEngine : Engine {
     }
 }
 
-/** Free backup path through Cloudflare WARP (WireGuard). Only used if the panel engine could not start. */
-class WarpEngine : Engine {
-    override val id = "warp"
-    override suspend fun prepare(ctx: Context): String = WarpReg.buildConfig(WarpReg.get())
+/**
+ * Free backup path through Cloudflare WARP (WireGuard). Only used if the panel engine could not be verified.
+ * The same free account is tried on several of Cloudflare's UDP ports, because ISPs often block just one of them.
+ */
+class WarpEngine(private val port: Int) : Engine {
+    override val id = "warp-$port"
+    override val label = "Cloudflare WARP ($port)"
+    override suspend fun prepare(ctx: Context): String = WarpReg.buildConfig(WarpReg.get(), port)
 }
 
 object VodiController {
+    private val WARP_PORTS = listOf(2408, 500, 4500)
+
     fun engines(): List<Engine> = buildList {
         add(PanelEngine())
-        if (Prefs.warpFallback) add(WarpEngine())
+        if (Prefs.warpFallback) WARP_PORTS.forEach { add(WarpEngine(it)) }
     }
 }
 
@@ -77,10 +89,10 @@ object WarpReg {
         }
     }
 
-    fun buildConfig(r: JSONObject): String {
+    fun buildConfig(r: JSONObject, port: Int = 2408): String {
         val v4 = r.getString("v4").let { if (it.contains("/")) it else "$it/32" }
         val warp = JSONObject().put("type", "wireguard").put("tag", "warp")
-            .put("server", "engage.cloudflareclient.com").put("server_port", 2408)
+            .put("server", "engage.cloudflareclient.com").put("server_port", port)
             .put("local_address", JSONArray().put(v4)).put("private_key", r.getString("private_key"))
             .put("peer_public_key", r.getString("peer_key")).put("mtu", 1280)
         val reserved = r.optJSONArray("reserved")
